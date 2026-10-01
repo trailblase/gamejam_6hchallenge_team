@@ -12,6 +12,8 @@ from game_state import RunState
 from ui import audio
 from ui import draw as D
 from ui import sprites as S
+from ui.character_sprites import draw_character
+from ui import topdown_assets as TD
 from ui.weather import draw_corruption_weather
 
 W, H = config.WINDOW_W, config.WINDOW_H
@@ -52,6 +54,9 @@ class UnitView:
         self.flash = 0.0
         self.squash = 0.0
         self.lunge = 0.0
+        self.attack_timer = 0.0
+        self.attack_animation = "attack01"
+        self.hurt_timer = 0.0
         self.lunge_dir = 1
         self.dying = None
         self.dead = False
@@ -63,11 +68,14 @@ class UnitView:
     def hit(self):
         self.flash = config.FLASH_SECONDS
         self.squash = config.HIT_SQUASH_SECONDS
+        self.hurt_timer = 0.36
 
     def update(self, dt):
         self.flash = max(0.0, self.flash - dt)
         self.squash = max(0.0, self.squash - dt)
         self.lunge = max(0.0, self.lunge - dt)
+        self.attack_timer = max(0.0, self.attack_timer - dt)
+        self.hurt_timer = max(0.0, self.hurt_timer - dt)
         if self.dying is not None and not self.dead:
             self.dying += dt
             if self.dying >= config.DEATH_FADE_SECONDS:
@@ -230,6 +238,12 @@ class BattleScene:
             if src:
                 src.lunge = LUNGE_SECONDS
                 src.lunge_dir = 1 if src.side == "party" else -1
+                src.attack_timer = 0.56
+                if src.side == "enemy":
+                    src.attack_animation = "attack02"
+                else:
+                    src.attack_animation = {"Warrior": "attack03", "Paladin": "attack02"}.get(
+                        src.name, "attack01")
             self._popup(uid, f"-{ev['amount']}", "pink_dark" if view.side == "party" else "ink")
             if view.side == "party":
                 self.shake = SHAKE_SECONDS
@@ -578,6 +592,10 @@ class BattleScene:
                  else "AUTO OFF  [A]   Q SKIP")
         D.text(screen, label, 11, "sage_dark" if self.auto_battle else "ink_soft",
                rect.center, anchor="center", shadow=False)
+        theme = pygame.Rect(W - 154, 52, 138, 26)
+        D.panel(screen, theme, radius=13, fill="cream", alpha=235, outline="gold")
+        theme_label = "M  MEDIEVAL" if self.app.medieval_mode else "M  CLASSIC"
+        D.text(screen, theme_label, 11, "ink", theme.center, anchor="center", shadow=False)
 
     def _draw_quick_summary(self, screen):
         veil = pygame.Surface((W, H), pygame.SRCALPHA)
@@ -613,6 +631,16 @@ class BattleScene:
                self.quick_continue_rect.center, anchor="center", shadow=False)
 
     def _draw_floor(self, screen):
+        if self.app.medieval_mode:
+            tile = TD.battle_floor_tile()
+            floor = pygame.Surface(FLOOR_RECT.size)
+            for y in range(0, FLOOR_RECT.height, tile.get_height()):
+                for x in range(0, FLOOR_RECT.width, tile.get_width()):
+                    floor.blit(tile, (x, y))
+            pygame.draw.rect(floor, D.PALETTE["bark"], floor.get_rect(), 5)
+            pygame.draw.rect(floor, D.PALETTE["gold"], floor.get_rect().inflate(-10, -10), 2)
+            screen.blit(floor, FLOOR_RECT.topleft)
+            return
         D.oval_shadow(screen, FLOOR_RECT.centerx, FLOOR_RECT.centery + 14, FLOOR_RECT.width, FLOOR_RECT.height, 60)
         tmp = pygame.Surface(FLOOR_RECT.size, pygame.SRCALPHA)
         pygame.draw.ellipse(tmp, D.with_alpha(D.PALETTE["cream"], 210), tmp.get_rect())
@@ -631,10 +659,31 @@ class BattleScene:
         if v.charging:
             pulse = 0.5 + 0.5 * math.sin(self.t * 6)
             S.draw_glow(screen, x, y - v.h * 0.5, v.w * (1.0 + 0.25 * pulse), "pink_dark", 1.3)
-        facing = 0.7 if v.side == "party" else -0.7
-        S.draw_body(screen, x, y + bob * 0.4, v.w, v.h + bob, v.color, facing_x=facing,
-                    squash=v.squash / config.HIT_SQUASH_SECONDS,
-                    flash=v.flash / config.FLASH_SECONDS, alpha=alpha, scale=scale)
+        sprite_actor = None
+        if self.app.medieval_mode:
+            sprite_actor = "soldier" if v.side == "party" else "orc"
+
+        if sprite_actor:
+            if v.dying is not None:
+                animation = "death"
+                animation_time = v.dying
+            elif v.hurt_timer > 0:
+                animation = "hurt"
+                animation_time = 0.36 - v.hurt_timer
+            elif v.attack_timer > 0:
+                animation = v.attack_animation
+                animation_time = 0.56 - v.attack_timer
+            else:
+                animation = "idle"
+                animation_time = self.t + v.phase_offset
+            draw_character(screen, sprite_actor, animation, animation_time, x, y + bob * 0.4,
+                           v.h * (1.42 if v.side == "party" else 1.4) * scale,
+                           flip=v.side == "enemy", alpha=alpha, tint=D.PALETTE[v.color])
+        else:
+            facing = 0.7 if v.side == "party" else -0.7
+            S.draw_body(screen, x, y + bob * 0.4, v.w, v.h + bob, v.color, facing_x=facing,
+                        squash=v.squash / config.HIT_SQUASH_SECONDS,
+                        flash=v.flash / config.FLASH_SECONDS, alpha=alpha, scale=scale)
         if v.uid == self.engine.leader.uid:
             D.draw_round_rect(screen, (x - 7, y - v.h - 16 + bob, 14, 8), D.PALETTE["gold"], 4)
             if self.guarded:

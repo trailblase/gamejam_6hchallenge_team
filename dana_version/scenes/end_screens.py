@@ -9,6 +9,7 @@ from data.characters import CHARACTERS
 from scenes.menus import menu_background, CONFIRM_KEYS
 from ui import draw as D
 from ui import sprites as S
+from ui.character_sprites import draw_character
 
 W, H = config.WINDOW_W, config.WINDOW_H
 
@@ -33,7 +34,12 @@ class GameOverScene:
     def draw(self, screen):
         menu_background(screen, self.t)
         D.text(screen, "Defeated", 64, "pink_dark", (W // 2, 180), anchor="center")
-        S.draw_body(screen, W // 2, 330, 80, 60, CHARACTERS[self.app.run.leader_key]["color"], squash=0.6)
+        if self.app.medieval_mode:
+            draw_character(screen, "soldier", "death", self.t, W // 2, 330, 72,
+                           tint=D.PALETTE[CHARACTERS[self.app.run.leader_key]["color"]])
+        else:
+            S.draw_body(screen, W // 2, 330, 80, 60,
+                        CHARACTERS[self.app.run.leader_key]["color"], squash=0.6)
         run = self.app.run
         D.text(screen, f"Bosses defeated: {len(run.bosses_defeated)}/{config.BOSSES_TO_WIN}", 18, "ink",
                (W // 2, 380), anchor="center", shadow=False)
@@ -62,7 +68,13 @@ class WinScene:
         run = self.app.run
         for i, key in enumerate(run.team):
             hop = abs(math.sin(self.t * 4 + i)) * 14
-            S.draw_body(screen, W // 2 - 110 + i * 110, 330 - hop, 62, 68, CHARACTERS[key]["color"])
+            if self.app.medieval_mode:
+                draw_character(screen, "soldier", "idle", self.t + i * 0.12,
+                               W // 2 - 110 + i * 110, 330 - hop, 68,
+                               tint=D.PALETTE[CHARACTERS[key]["color"]])
+            else:
+                S.draw_body(screen, W // 2 - 110 + i * 110, 330 - hop,
+                            62, 68, CHARACTERS[key]["color"])
         D.text(screen, f"Battles fought: {run.battles_fought}", 18, "ink", (W // 2, 390), anchor="center",
                shadow=False)
         alpha = int(150 + 105 * (0.5 + 0.5 * math.sin(self.t * 3)))

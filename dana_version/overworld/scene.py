@@ -12,6 +12,8 @@ from overworld.world import World
 from ui import audio
 from ui import draw as D
 from ui import sprites as S
+from ui.character_sprites import draw_character
+from ui import topdown_assets as TD
 from ui.weather import draw_corruption_weather
 
 T = config.TILE
@@ -73,6 +75,7 @@ class _Talk:
 class OverworldScene:
     def __init__(self, app):
         self.app = app
+        self.medieval_mode = app.medieval_mode
         self.run = app.run
         self.world = World(app.rng, self.run.defeated, self.run.springs_used, self.run.chests_opened)
         print(f"[overworld] map check ok: {self.world.reachable_tiles} reachable tiles; "
@@ -103,6 +106,12 @@ class OverworldScene:
     def _render_ground(self):
         tm = self.world.map
         w, h = tm.pixel_size
+        if self.medieval_mode:
+            surf = pygame.Surface((w, h))
+            for ty in range(tm.h):
+                for tx in range(tm.w):
+                    surf.blit(TD.ground_tile(tm.kind(tx, ty), tx, ty), (tx * T, ty * T))
+            return surf
         surf = pygame.Surface((w, h))
         surf.fill(D.PALETTE["grass"])
         deco = random.Random(1234)     # visual-only noise, separate from the game RNG
@@ -171,7 +180,8 @@ class OverworldScene:
             for tx in range(tm.w):
                 kind = tm.kind(tx, ty)
                 if kind in ("tree", "bush"):
-                    props.append((kind, tx * T + T / 2, (ty + 1) * T))
+                    variant = (tx * 7 + ty * 11) % (3 if kind == "tree" else 6)
+                    props.append((kind, tx * T + T / 2, (ty + 1) * T, variant))
         return props
 
     # ---------------------------------------------------------------- input
@@ -374,10 +384,10 @@ class OverworldScene:
 
         drawables = []
         margin = T * 2
-        for kind, x, y in self.props:
+        for kind, x, y, variant in self.props:
             sx, sy = x - cam_x, y - cam_y
             if -margin < sx < vw + margin and -margin < sy < vh + margin * 2:
-                drawables.append((y, kind, sx, sy, None))
+                drawables.append((y, kind, sx, sy, variant))
         for spring in self.world.springs:
             drawables.append((spring.y, "spring", spring.x - cam_x, spring.y - cam_y, spring))
         for chest in self.world.chests:
@@ -398,13 +408,25 @@ class OverworldScene:
         drawables.sort(key=lambda d: d[0])
         for _, kind, sx, sy, obj in drawables:
             if kind == "tree":
-                S.draw_tree(screen, sx, sy, T, self.t)
+                if self.medieval_mode:
+                    TD.draw_tree(screen, sx, sy, obj)
+                else:
+                    S.draw_tree(screen, sx, sy, T, self.t)
             elif kind == "bush":
-                S.draw_bush(screen, sx, sy, T)
+                if self.medieval_mode:
+                    TD.draw_bush(screen, sx, sy, obj)
+                else:
+                    S.draw_bush(screen, sx, sy, T)
             elif kind == "spring":
-                S.draw_spring(screen, sx, sy, obj.used, self.t)
+                if self.medieval_mode:
+                    TD.draw_spring(screen, sx, sy, obj.used)
+                else:
+                    S.draw_spring(screen, sx, sy, obj.used, self.t)
             elif kind == "chest":
-                S.draw_chest(screen, sx, sy, obj.opened, self.t)
+                if self.medieval_mode:
+                    TD.draw_chest(screen, sx, sy, obj.opened)
+                else:
+                    S.draw_chest(screen, sx, sy, obj.opened, self.t)
             elif kind == "enemy":
                 self._draw_enemy(screen, obj, sx, sy)
             elif kind == "guide":
@@ -413,15 +435,24 @@ class OverworldScene:
                 if not self.talk:
                     D.text(screen, obj.name, 13, "ink", (sx, sy - 56), anchor="center")
             elif kind == "follower":
-                bob = math.sin(self.t * 9 + sx * 0.1) * 2 if p.moving else math.sin(self.t * config.BOB_SPEED) * 1.5
-                S.draw_body(screen, sx, sy - abs(bob), FOLLOWER_W, FOLLOWER_H, CHARACTERS[obj]["color"],
-                            facing_x=p.facing[0])
+                if self.medieval_mode:
+                    TD.draw_player(screen, sx, sy, p.facing, D.PALETTE[CHARACTERS[obj]["color"]],
+                                   self.t + sx * 0.013, p.moving)
+                else:
+                    bob = math.sin(self.t * 9 + sx * 0.1) * 2 if p.moving else math.sin(self.t * config.BOB_SPEED) * 1.5
+                    S.draw_body(screen, sx, sy - abs(bob), FOLLOWER_W, FOLLOWER_H, CHARACTERS[obj]["color"],
+                                facing_x=p.facing[0])
             elif kind == "leader":
                 self._draw_dust(screen, cam_x, cam_y)
-                bob = abs(math.sin(self.t * 10)) * 3 if p.moving else math.sin(self.t * config.BOB_SPEED) * 1.5
-                S.draw_body(screen, sx, sy - bob, LEADER_W, LEADER_H,
-                            CHARACTERS[self.run.leader_key]["color"], facing_x=p.facing[0])
-                D.draw_round_rect(screen, (sx - 5, sy - LEADER_H - 14 - bob, 10, 6), D.PALETTE["gold"], 3)
+                if self.medieval_mode:
+                    TD.draw_player(screen, sx, sy, p.facing,
+                                   D.PALETTE[CHARACTERS[self.run.leader_key]["color"]], self.t, p.moving)
+                    D.draw_round_rect(screen, (sx - 5, sy - 46, 10, 6), D.PALETTE["gold"], 3)
+                else:
+                    bob = abs(math.sin(self.t * 10)) * 3 if p.moving else math.sin(self.t * config.BOB_SPEED) * 1.5
+                    S.draw_body(screen, sx, sy - bob, LEADER_W, LEADER_H,
+                                CHARACTERS[self.run.leader_key]["color"], facing_x=p.facing[0])
+                    D.draw_round_rect(screen, (sx - 5, sy - LEADER_H - 14 - bob, 10, 6), D.PALETTE["gold"], 3)
 
         draw_corruption_weather(screen, self.meter, self.t)
         self._draw_hud(screen)
@@ -502,6 +533,37 @@ class OverworldScene:
                 D.draw_round_rect(screen, (rx, ry, 14, 4), D.PALETTE["blue_light"], 2)
 
     def _draw_enemy(self, screen, enemy, sx, sy):
+        if self.medieval_mode:
+            if enemy.is_boss:
+                data = BOSSES[enemy.key]
+                size = data["size"] * OVERWORLD_BOSS_SCALE
+                pulse = 0.5 + 0.5 * math.sin(self.t * 2)
+                S.draw_glow(screen, sx, sy - size * 0.5, size * (1.2 + 0.15 * pulse), data["color"], 1.0)
+                draw_character(screen, "orc", "idle", self.t, sx, sy, size * 1.35,
+                               tint=D.PALETTE[data["color"]])
+                D.text(screen, data["name"], 14, "ink", (sx, sy - size - 20), anchor="center")
+                return
+            data = ENEMIES[enemy.key[0]]
+            size = data["size"] * OVERWORLD_ENEMY_SCALE
+            stunned = enemy.stun > 0
+            alpha = 150 if stunned and int(self.t * 8) % 2 else 255
+            walking = enemy.chasing
+            bob = abs(math.sin(self.t * 8)) * 3 if walking else math.sin(self.t * 2 + enemy.home[0]) * 1.5
+            draw_character(screen, "orc", "walk" if walking else "idle", self.t,
+                           sx, sy - bob, size * 1.45,
+                           flip=self.world.player.x > enemy.x, alpha=alpha,
+                           tint=D.PALETTE[data["color"]])
+            if len(enemy.key) > 1:
+                pill = pygame.Rect(0, 0, 26, 16)
+                pill.center = (sx + size * 0.55, sy - size * 0.9)
+                D.draw_round_rect(screen, pill, D.PALETTE["cream"], 8)
+                D.text(screen, f"x{len(enemy.key)}", 11, "ink", pill.center, anchor="center", shadow=False)
+            if stunned:
+                D.text(screen, "zz", 13, "ink_soft", (sx, sy - size - 10), anchor="center", shadow=False)
+            elif enemy.chasing:
+                D.text(screen, "!", 18, "pink_dark", (sx, sy - size - 12), anchor="center")
+            return
+
         if enemy.is_boss:
             data = BOSSES[enemy.key]
             size = data["size"] * OVERWORLD_BOSS_SCALE
@@ -548,6 +610,12 @@ class OverworldScene:
         pill.topright = (vw - 14, 14)
         D.panel(screen, pill, radius=18)
         D.text(screen, boss_txt, 16, "ink", pill.center, anchor="center", shadow=False)
+
+        theme = pygame.Rect(0, 0, 150, 28)
+        theme.topright = (vw - 14, 58)
+        D.panel(screen, theme, radius=14, fill="cream", alpha=235, outline="gold")
+        theme_label = "M  MEDIEVAL" if self.medieval_mode else "M  CLASSIC"
+        D.text(screen, theme_label, 12, "ink", theme.center, anchor="center", shadow=False)
 
         self._draw_corruption_meter(screen)
         guide = None if self.talk else self.world.nearby_guide()

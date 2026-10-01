@@ -22,6 +22,8 @@ class App:
         self.rng = random.Random(seed)
         print(f"[app] RNG seed {seed}  (set data/config.py SEED to replay)")
         self.run = None
+        self.medieval_mode = True
+        D.set_style(self.medieval_mode)
         self.first_run = True
         self.debug = False
         self.running = True
@@ -44,6 +46,25 @@ class App:
         print(f"[app] new run: team {team}, leader {team[leader_index]}")
         self.transition_to(OverworldScene(self))
 
+    def toggle_theme(self):
+        self.medieval_mode = not self.medieval_mode
+        D.set_style(self.medieval_mode)
+
+        # Keep the live map and the current battle's blurred background in sync.
+        scene = getattr(self.state, "target", self.state)
+        overworld = getattr(scene, "overworld", None)
+        if overworld is None and hasattr(scene, "_render_ground"):
+            overworld = scene
+        if overworld is not None:
+            overworld.medieval_mode = self.medieval_mode
+            overworld.ground = overworld._render_ground()
+            overworld.overlay_cache.clear()
+            if hasattr(scene, "backdrop") and hasattr(scene, "_make_backdrop"):
+                snapshot = pygame.Surface(self.screen.get_size())
+                overworld.draw(snapshot)
+                scene.backdrop = scene._make_backdrop(
+                    snapshot, overworld.world.corruption.fraction_of_cap)
+
     def quit(self):
         self.running = False
 
@@ -53,9 +74,13 @@ class App:
                 self.running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
                 self.debug = not self.debug
+            elif (event.type == pygame.KEYDOWN and event.key == pygame.K_m
+                  and self.run is not None and type(self.state).__name__ != "TitleScene"):
+                self.toggle_theme()
             else:
                 self.state.handle_event(event)
         self.state.update(dt)
+        D.set_style(self.medieval_mode)
         self.state.draw(self.screen)
         if self.debug:
             self._draw_debug()

@@ -31,6 +31,38 @@ PALETTE = {
     "path": (232, 214, 176),
     "path_dark": (214, 192, 150),
 }
+_CLASSIC_PALETTE = PALETTE.copy()
+_MEDIEVAL_PALETTE = {
+    "cream": (227, 215, 188), "cream_dark": (183, 163, 130), "white": (239, 229, 201),
+    "ink": (49, 41, 32), "ink_soft": (105, 86, 64),
+    "sage": (136, 145, 83), "sage_light": (171, 171, 104), "sage_dark": (73, 91, 49),
+    "grass": (114, 133, 56), "grass_dark": (94, 111, 48),
+    "blue": (83, 127, 145), "blue_light": (145, 179, 182), "blue_dark": (53, 88, 103),
+    "peach": (193, 149, 96), "peach_dark": (136, 91, 57),
+    "pink": (181, 119, 108), "pink_dark": (128, 67, 61),
+    "lavender": (142, 126, 151), "lavender_dark": (92, 73, 109),
+    "gold": (200, 160, 78), "bark": (113, 77, 51),
+    "plum": (105, 55, 112), "plum_light": (159, 111, 153),
+    "path": (183, 165, 127), "path_dark": (132, 113, 81),
+}
+CURRENT_STYLE = "classic"
+_CLASSIC_FONT_NAMES = "nunito,quicksand,varelaround,segoeui,trebuchetms,arial"
+_MEDIEVAL_FONT_NAMES = "bookantiqua,georgia,garamond,timesnewroman,serif"
+FONT_NAMES = _CLASSIC_FONT_NAMES
+
+
+def set_style(medieval=False):
+    """Switch shared interface colors and panel shapes for the active art mode."""
+    global CURRENT_STYLE, FONT_NAMES
+    style = "medieval" if medieval else "classic"
+    if style == CURRENT_STYLE:
+        return
+    CURRENT_STYLE = style
+    FONT_NAMES = _MEDIEVAL_FONT_NAMES if medieval else _CLASSIC_FONT_NAMES
+    PALETTE.clear()
+    PALETTE.update(_MEDIEVAL_PALETTE if medieval else _CLASSIC_PALETTE)
+    _fonts.clear()
+    _text_cache.clear()
 
 
 def color(name):
@@ -72,6 +104,22 @@ def oval_shadow(surface, cx, cy, w, h, alpha=70):
 
 def panel(surface, rect, radius=16, fill="cream", alpha=225, outline="ink_soft"):
     rect = pygame.Rect(rect)
+    if CURRENT_STYLE == "medieval":
+        soft_shadow(surface, rect, 2, alpha=92, offset=(0, 4))
+        cut = max(5, min(10, rect.height // 8, rect.width // 8))
+        points = [(cut, 0), (rect.width - cut, 0), (rect.width, cut),
+                  (rect.width, rect.height - cut), (rect.width - cut, rect.height),
+                  (cut, rect.height), (0, rect.height - cut), (0, cut)]
+        fill_col = PALETTE[fill] if isinstance(fill, str) else fill
+        outline_col = PALETTE[outline] if isinstance(outline, str) else outline
+        face = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.polygon(face, (*fill_col[:3], alpha), points)
+        pygame.draw.polygon(face, (*outline_col[:3], 225), points, 2)
+        if rect.width > 24 and rect.height > 12:
+            pygame.draw.line(face, (*PALETTE["gold"], 115), (cut + 4, 4),
+                             (rect.width - cut - 4, 4), 1)
+        surface.blit(face, rect.topleft)
+        return
     soft_shadow(surface, rect, radius)
     draw_round_rect(surface, rect, with_alpha(PALETTE[fill], alpha), radius)
     draw_round_rect(surface, rect, with_alpha(PALETTE[outline], 140), radius, width=2)
@@ -80,7 +128,6 @@ def panel(surface, rect, radius=16, fill="cream", alpha=225, outline="ink_soft")
 # -------------------------------------------------------------------- text
 _fonts = {}
 _text_cache = {}
-FONT_NAMES = "nunito,quicksand,varelaround,segoeui,trebuchetms,arial"
 
 
 def font(size):
