@@ -350,9 +350,13 @@ class BattleScene:
             self._submit({"kind": "flee"})
 
     def _begin_target(self, pending):
+        targets = self._targets()
+        if len(targets) == 1:
+            self._submit({"kind": pending, "target": targets[0].uid})
+            return
         self.pending = pending
         self.mode = "target"
-        self.target_index = min(self.target_index, len(self._targets()) - 1)
+        self.target_index = min(self.target_index, len(targets) - 1)
 
     def _target_input(self, event):
         targets = self._targets()
