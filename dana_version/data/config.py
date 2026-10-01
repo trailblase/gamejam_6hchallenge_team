@@ -6,7 +6,7 @@ WINDOW_W = 960
 WINDOW_H = 600
 FPS = 60
 MAX_DT = 1 / 30           # clamp long frames so movement never teleports
-TITLE = "Corruption"
+TITLE = "Knights and Slimes!"
 SEED = None               # int = reproducible run; None = random seed (printed at start)
 MUSIC_VOLUME = 0.45
 SFX_VOLUME = 0.7
