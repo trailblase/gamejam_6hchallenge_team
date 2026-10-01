@@ -5,12 +5,14 @@ import random
 import pygame
 
 from data import config
+from ui import audio
 from ui import draw as D
 
 
 class App:
     def __init__(self, seed=None):
         pygame.init()
+        audio.init()
         self.screen = pygame.display.set_mode((config.WINDOW_W, config.WINDOW_H))
         pygame.display.set_caption(config.TITLE)
         self.clock = pygame.time.Clock()

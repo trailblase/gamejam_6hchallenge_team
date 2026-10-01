@@ -9,6 +9,7 @@ import pygame
 from data import config
 from battle.auto import choose_action, choose_reward
 from game_state import RunState
+from ui import audio
 from ui import draw as D
 from ui import sprites as S
 from ui.weather import draw_corruption_weather
@@ -107,6 +108,7 @@ class BattleScene:
         self.run = app.run
         self.overworld = overworld
         self.entity = enemy_entity
+        audio.play_music("battle")
         kind = "boss" if enemy_entity.is_boss else "normal"
         defs = RunState.enemy_defs_for(kind, enemy_entity.key)
         self.touched_corruption = self.run.touched_corruption
@@ -223,6 +225,7 @@ class BattleScene:
         elif kind == "damage":
             view.bar.set(ev["hp"], ev["max_hp"])
             view.hit()
+            audio.play("hit")
             src = self.views.get(ev.get("source"))
             if src:
                 src.lunge = LUNGE_SECONDS
@@ -231,6 +234,7 @@ class BattleScene:
             if view.side == "party":
                 self.shake = SHAKE_SECONDS
         elif kind == "blocked":
+            audio.play("block")
             src = self.views.get(ev.get("source"))
             if src:
                 src.lunge = LUNGE_SECONDS
@@ -254,6 +258,7 @@ class BattleScene:
             view.charging = ev["charging"]
         elif kind == "guard":
             self.guarded = True
+            audio.play("block")
             self._popup(uid, "GUARD", "blue_dark", 22)
         elif kind == "guard_end":
             self.guarded = False
@@ -261,6 +266,7 @@ class BattleScene:
             self.sp, self.max_sp = ev["sp"], ev["max_sp"]
         elif kind == "flee":
             view.bar.set(ev["hp"], ev["max_hp"])
+            audio.play("flee")
             if ev["amount"]:
                 self._popup(uid, f"-{ev['amount']}", "pink_dark")
         self.event_timer = config.EVENT_SECONDS.get(kind, 0.2)
@@ -268,6 +274,8 @@ class BattleScene:
     def _submit(self, action):
         self.mode = "events"
         self.pending = None
+        if action.get("kind") == "skill":
+            audio.play("skill")
         self.queue.extend(self.engine.apply_action(action))
 
     # --------------------------------------------------------------- input

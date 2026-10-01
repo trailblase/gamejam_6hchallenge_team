@@ -9,6 +9,7 @@ from data import config
 from data.characters import CHARACTERS
 from data.enemies import ENEMIES, BOSSES
 from overworld.world import World
+from ui import audio
 from ui import draw as D
 from ui import sprites as S
 from ui.weather import draw_corruption_weather
@@ -76,6 +77,7 @@ class OverworldScene:
         self.world = World(app.rng, self.run.defeated, self.run.springs_used, self.run.chests_opened)
         print(f"[overworld] map check ok: {self.world.reachable_tiles} reachable tiles; "
               f"corruption seeds {self.world.corruption.count}, cap {self.world.corruption.cap}")
+        audio.play_music("overworld")
         self.ground = self._render_ground()
         self.minimap = self._render_minimap()
         self.props = self._collect_props()
@@ -335,10 +337,12 @@ class OverworldScene:
                 from scenes.end_screens import WinScene
                 self.app.transition_to(WinScene(self.app))
                 return
+            audio.play_music("overworld")
             self.app.transition_to(self)
         elif outcome == "fled":
             self.world.stun_enemy(enemy.id)
             self._toast("You got away! The enemy is dazed for a moment.")
+            audio.play_music("overworld")
             self.app.transition_to(self)
         else:
             from scenes.end_screens import GameOverScene
@@ -349,6 +353,7 @@ class OverworldScene:
         self.run.retry()
         self.world.respawn_player(config.WINDOW_W, config.WINDOW_H)
         self.hp_bar = D.AnimatedBar(self.run.leader_hp, self.run.leader_max_hp)
+        audio.play_music("overworld")
         print("[overworld] retry: respawned at start with full HP")
 
     def _debug_win_nearest(self):

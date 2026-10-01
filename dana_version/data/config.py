@@ -8,6 +8,8 @@ FPS = 60
 MAX_DT = 1 / 30           # clamp long frames so movement never teleports
 TITLE = "Corruption"
 SEED = None               # int = reproducible run; None = random seed (printed at start)
+MUSIC_VOLUME = 0.45
+SFX_VOLUME = 0.7
 
 # ------------------------------------------------------------------ overworld
 TILE = 32                 # pixels per map tile
