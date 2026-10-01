@@ -36,16 +36,24 @@ CORRUPT_START_SEEDS = 4          # corrupted tiles at the start of a run
 CORRUPT_SEED_MIN_START_DIST = 3  # seeds never land within this many tiles of the player start
 CORRUPT_GUARD_RADIUS = 2         # a seed lands within this many tiles of a "guarded" chest
 CORRUPT_ARENA_RADIUS = 3         # tiles this close to a boss marker are arena and never corrupt
-CORRUPT_SPREAD_INTERVAL = 5.0    # seconds between spread steps
+CORRUPT_SPREAD_INTERVAL = 5.0 / 3.0  # 3x faster than the original 5-second interval
 CORRUPT_SPREAD_CHANCE = 0.25     # per corrupted tile per step: chance to infect one neighbor
 CORRUPT_MAX_FRACTION = 0.35      # spreading stops at this share of walkable tiles
 CORRUPT_SLOW = 0.5               # leader speed multiplier while standing on corruption
+CORRUPTION_TILE_DPS = 8.0        # leader HP lost per second while standing on corruption
+CORRUPTION_TOUCH_ATK_PENALTY = 0.10  # next battle's party ATK penalty after touching corruption
 CORRUPT_PULSE_SPEED = 1.6        # overlay alpha pulse (radians per second)
 CORRUPT_ALPHA = (120, 165)       # overlay alpha range (min, max) for the pulse
 CORRUPT_DUST_INTERVAL = 0.08     # seconds between dust puffs while slowed
 CORRUPT_DUST_LIFE = 0.6          # seconds a dust puff lives
 CORRUPT_METER_LERP = 4.0         # how quickly the edge meter eases to the real value
 CORRUPT_BATTLE_TINT_MAX = 110    # backdrop purple alpha at full corruption (0-255)
+CORRUPTION_GRAYSCALE_MAX_ALPHA = 128  # partial grayscale blend; retain slight color at full corruption
+CORRUPTION_VIGNETTE_MAX_ALPHA = 62
+CORRUPTION_RAIN_BASE_DROPS = 24
+CORRUPTION_RAIN_MAX_EXTRA_DROPS = 300
+CORRUPTION_RAIN_BASE_SPEED = 240
+CORRUPTION_RAIN_MAX_EXTRA_SPEED = 360
 
 # ------------------------------------------------------------- chests/buffs
 CHEST_OPEN_RADIUS = 1.4 * TILE   # px; press E within this range of a chest
@@ -65,9 +73,11 @@ BOSS_PHASE_HP_PCT = 0.5   # boss enrages and may charge below this HP share
 BOSSES_TO_WIN = 3
 TIMELINE_LENGTH = 6       # units shown in the turn-order bar
 REWARD_CHOICES = 3
+AUTO_BATTLE_DEFAULT = True
 
 # ------------------------------------------------- battle presentation timing
 ENEMY_TURN_DELAY = 0.45   # pause before an enemy acts (seconds)
+AUTO_ACTION_DELAY = 0.38  # pause so automatic party choices remain readable
 EVENT_SECONDS = {         # how long each kind of event holds the screen
     "turn_start": 0.12,
     "damage": 0.45,

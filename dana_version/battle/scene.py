@@ -7,9 +7,11 @@ from collections import deque
 import pygame
 
 from data import config
+from battle.auto import choose_action, choose_reward
 from game_state import RunState
 from ui import draw as D
 from ui import sprites as S
+from ui.weather import draw_corruption_weather
 
 W, H = config.WINDOW_W, config.WINDOW_H
 FLOOR_RECT = pygame.Rect(0, 0, 880, 220)
@@ -107,6 +109,7 @@ class BattleScene:
         self.entity = enemy_entity
         kind = "boss" if enemy_entity.is_boss else "normal"
         defs = RunState.enemy_defs_for(kind, enemy_entity.key)
+        self.touched_corruption = self.run.touched_corruption
         self.engine = self.run.make_battle(defs, can_flee=not enemy_entity.is_boss)
         self.backdrop = self._make_backdrop(snapshot, overworld.world.corruption.fraction_of_cap)
 
@@ -145,6 +148,14 @@ class BattleScene:
         self.rewards = []
         self.reward_index = 0
         self.finished = False
+        self.auto_battle = config.AUTO_BATTLE_DEFAULT
+        self.auto_elapsed = 0.0
+        self.result_recorded = False
+        self.quick_outcome = None
+        self.quick_reward = None
+        self.quick_hp_after_battle = None
+        self.quick_max_hp_after_battle = None
+        self.quick_continue_rect = pygame.Rect(W // 2 - 105, H // 2 + 112, 210, 42)
 
         names = " + ".join(e.name for e in self.engine.enemies)
         print(f"[battle] {names}  vs  {[p.name for p in self.engine.party]} "
@@ -261,6 +272,21 @@ class BattleScene:
 
     # --------------------------------------------------------------- input
     def handle_event(self, event):
+        if self.mode == "quick_summary":
+            self._quick_summary_input(event)
+            return
+        if (event.type == pygame.KEYDOWN and event.key == pygame.K_q
+                and self.engine.outcome is None and self.mode in ("menu", "events", "target")):
+            self._quick_resolve()
+            return
+        if (event.type == pygame.KEYDOWN and event.key == pygame.K_a
+                and self.engine.outcome is None and self.mode in ("menu", "events")):
+            self.auto_battle = not self.auto_battle
+            self.auto_elapsed = 0.0
+            if self.auto_battle and self.mode == "menu":
+                self.mode = "events"
+            print(f"[battle] auto-battle {'ON' if self.auto_battle else 'OFF'}")
+            return
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F2 and self.engine.outcome is None:
             print("[debug] F2: instant win")
             self.mode = "events"
@@ -384,6 +410,55 @@ class BattleScene:
               f"{self.run.leader_hp}/{self.run.leader_max_hp}")
         self._finish("victory")
 
+    def _record_result(self):
+        if not self.result_recorded:
+            self.run.finish_battle(self.engine)
+            self.result_recorded = True
+
+    def _quick_resolve(self):
+        """Resolve the remaining battle logic immediately, then show a recap."""
+        if self.engine.outcome is not None:
+            return
+        self.mode = "quick_summary"
+        self.queue.clear()
+        self.event_timer = 0.0
+        self.enemy_wait = 0.0
+        steps = 0
+        while self.engine.outcome is None and steps < 5000:
+            if self.engine.current.side == "party":
+                self.engine.apply_action(choose_action(self.engine))
+            else:
+                self.engine.take_enemy_turn()
+            steps += 1
+        if self.engine.outcome is None:
+            self.mode = "events"
+            self.queue.append({"type": "turn_start",
+                               "log": "Quick battle paused: action limit reached.",
+                               "uid": self.engine.current.uid,
+                               "timeline": self.engine.timeline()})
+            return
+
+        self._record_result()
+        self.quick_outcome = self.engine.outcome
+        self.quick_hp_after_battle = self.run.leader_hp
+        self.quick_max_hp_after_battle = self.run.leader_max_hp
+        if self.quick_outcome == "victory":
+            self.rewards = self.run.roll_rewards()
+            self.quick_reward = choose_reward(self.rewards, self.run)
+            self.run.apply_reward(self.quick_reward)
+            self.run.victory_heal()
+        print(f"[battle] quick result {self.quick_outcome}; HP "
+              f"{self.quick_hp_after_battle}/{self.run.leader_max_hp}; "
+              f"reward {self.quick_reward['name'] if self.quick_reward else 'none'}")
+
+    def _quick_summary_input(self, event):
+        if event.type == pygame.KEYDOWN and event.key in (
+                pygame.K_SPACE, pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._finish(self.quick_outcome)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.quick_continue_rect.collidepoint(event.pos):
+                self._finish(self.quick_outcome)
+
     def _finish(self, outcome):
         if self.finished:
             return
@@ -400,7 +475,7 @@ class BattleScene:
         self.reason_timer = max(0.0, self.reason_timer - dt)
         self.shake = max(0.0, self.shake - dt)
 
-        if self.mode in ("menu", "target", "reward"):
+        if self.mode in ("menu", "target", "reward", "quick_summary"):
             return
         if self.mode in ("victory", "defeat", "fled"):
             self.mode_timer -= dt
@@ -423,7 +498,7 @@ class BattleScene:
 
         outcome = self.engine.outcome
         if outcome:
-            self.run.finish_battle(self.engine)
+            self._record_result()
             self.mode = outcome
             self.mode_age = 0.0
             self.mode_timer = {"victory": config.VICTORY_BANNER_SECONDS,
@@ -436,8 +511,16 @@ class BattleScene:
                 self.enemy_wait = 0.0
                 self.queue.extend(self.engine.take_enemy_turn())
         else:
-            self.mode = "menu"
-            self.menu_index = 0
+            if self.auto_battle:
+                self.mode = "events"
+                self.auto_elapsed += dt
+                if self.auto_elapsed >= config.AUTO_ACTION_DELAY:
+                    self.auto_elapsed = 0.0
+                    self._submit(choose_action(self.engine))
+            else:
+                self.auto_elapsed = 0.0
+                self.mode = "menu"
+                self.menu_index = 0
 
     # ---------------------------------------------------------------- draw
     def draw(self, screen):
@@ -448,6 +531,8 @@ class BattleScene:
         for v in sorted(self.views.values(), key=lambda v: v.y):
             if not v.dead:
                 self._draw_unit(screen, v, ox)
+        draw_corruption_weather(screen, self.overworld.world.corruption.fraction_of_cap, self.t)
+        self._draw_auto_badge(screen)
         for v in self.views.values():
             if v.side == "enemy" and not v.gone:
                 self._draw_enemy_info(screen, v)
@@ -465,6 +550,55 @@ class BattleScene:
             self._draw_center_banner(screen, "Defeated...", "pink_dark")
         elif self.mode == "reward":
             self._draw_rewards(screen)
+        elif self.mode == "quick_summary":
+            self._draw_quick_summary(screen)
+
+    def _draw_auto_badge(self, screen):
+        if self.touched_corruption:
+            status = pygame.Rect(16, 16, 205, 30)
+            D.panel(screen, status, radius=15, fill="cream", alpha=235, outline="plum")
+            D.text(screen, "TOUCHED  ·  PARTY ATK -10%", 12, "plum",
+                   status.center, anchor="center", shadow=False)
+        rect = pygame.Rect(W - 204, 16, 188, 30)
+        D.panel(screen, rect, radius=15, fill="cream", alpha=235,
+                outline="sage_dark" if self.auto_battle else "ink_soft")
+        label = ("AUTO ON  [A]   Q SKIP" if self.auto_battle
+                 else "AUTO OFF  [A]   Q SKIP")
+        D.text(screen, label, 11, "sage_dark" if self.auto_battle else "ink_soft",
+               rect.center, anchor="center", shadow=False)
+
+    def _draw_quick_summary(self, screen):
+        veil = pygame.Surface((W, H), pygame.SRCALPHA)
+        veil.fill(D.with_alpha(D.PALETTE["ink"], 155))
+        screen.blit(veil, (0, 0))
+        box = pygame.Rect(W // 2 - 270, H // 2 - 178, 540, 356)
+        won = self.quick_outcome == "victory"
+        D.panel(screen, box, radius=24, fill="cream", alpha=250,
+                outline="sage_dark" if won else "pink_dark")
+        D.text(screen, "QUICK BATTLE  ·  VICTORY" if won else "QUICK BATTLE  ·  DEFEAT",
+               27, "sage_dark" if won else "pink_dark",
+               (box.centerx, box.y + 38), anchor="center", shadow=False)
+        D.text(screen, f"HP after battle: {self.quick_hp_after_battle}/"
+                      f"{self.quick_max_hp_after_battle}", 19, "ink",
+               (box.centerx, box.y + 100), anchor="center", shadow=False)
+        if won and self.quick_reward:
+            D.text(screen, "REWARD RECEIVED", 13, "ink_soft",
+                   (box.centerx, box.y + 145), anchor="center", shadow=False)
+            D.text(screen, self.quick_reward["name"], 22, "ink",
+                   (box.centerx, box.y + 177), anchor="center", shadow=False)
+            D.text(screen, self.quick_reward["desc"], 16, "ink_soft",
+                   (box.centerx, box.y + 207), anchor="center", shadow=False)
+            D.text(screen, f"HP after reward and rest: {self.run.leader_hp}/"
+                          f"{self.run.leader_max_hp}", 16, "sage_dark",
+                   (box.centerx, box.y + 241), anchor="center", shadow=False)
+        else:
+            D.text(screen, "No reward this time.", 17, "ink_soft",
+                   (box.centerx, box.y + 177), anchor="center", shadow=False)
+
+        D.panel(screen, self.quick_continue_rect, radius=16, fill="peach",
+                outline="peach_dark")
+        D.text(screen, "Continue   [Space]", 16, "ink",
+               self.quick_continue_rect.center, anchor="center", shadow=False)
 
     def _draw_floor(self, screen):
         D.oval_shadow(screen, FLOOR_RECT.centerx, FLOOR_RECT.centery + 14, FLOOR_RECT.width, FLOOR_RECT.height, 60)
@@ -654,7 +788,7 @@ class BattleScene:
     def debug_lines(self):
         e = self.engine
         lines = [f"mode {self.mode}  queue {len(self.queue)}  SP {e.sp}/{e.max_sp}  guard_by {e.guard_by}  "
-                 f"party actions {e.party_actions}",
+                 f"party actions {e.party_actions}  auto {'on' if self.auto_battle else 'off'}",
                  "gauges: " + "  ".join(f"{u.name}:{u.gauge}/{u.spd}" for u in e.units()),
                  f"buffs: {', '.join(b['name'] for b in self.run.buffs) or 'none'}   ward left {e.ward}"]
         for en in e.enemies:

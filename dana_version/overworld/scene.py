@@ -11,6 +11,7 @@ from data.enemies import ENEMIES, BOSSES
 from overworld.world import World
 from ui import draw as D
 from ui import sprites as S
+from ui.weather import draw_corruption_weather
 
 T = config.TILE
 LEADER_W, LEADER_H = 24, 28
@@ -42,6 +43,8 @@ class OverworldScene:
         self.buff_popup = None
         self.buff_timer = 0.0
         self.overlay_cache = {}
+        self.corruption_damage_fraction = 0.0
+        self._was_on_corruption = False
 
     # ------------------------------------------------------------ prerender
     def _render_ground(self):
@@ -139,6 +142,17 @@ class OverworldScene:
         mx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
         my = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
         touched = self.world.update(dt, mx, my, config.WINDOW_W, config.WINDOW_H)
+        on_corruption = self.world.leader_slowed
+        if on_corruption:
+            if not self._was_on_corruption:
+                self.run.touch_corruption()
+                self._toast("Rot burns you. Party ATK -10% next battle.")
+            self.corruption_damage_fraction += dt * config.CORRUPTION_TILE_DPS
+            damage = int(self.corruption_damage_fraction)
+            if damage:
+                self.corruption_damage_fraction -= damage
+                self.run.damage_leader(damage)
+        self._was_on_corruption = on_corruption
         if self.hint_timer > 0:
             self.hint_timer -= dt
         if self.toast_timer > 0:
@@ -146,6 +160,10 @@ class OverworldScene:
         self.hp_bar.set(self.run.leader_hp, self.run.leader_max_hp)
         self.hp_bar.update(dt)
         self._update_corruption_fx(dt)
+        if self.run.leader_hp <= 0:
+            from scenes.end_screens import GameOverScene
+            self.app.transition_to(GameOverScene(self.app, self))
+            return
         if touched:
             self._start_battle(touched)
 
@@ -259,6 +277,7 @@ class OverworldScene:
                             CHARACTERS[self.run.leader_key]["color"], facing_x=p.facing[0])
                 D.draw_round_rect(screen, (sx - 5, sy - LEADER_H - 14 - bob, 10, 6), D.PALETTE["gold"], 3)
 
+        draw_corruption_weather(screen, self.meter, self.t)
         self._draw_hud(screen)
 
     def _overlay_tile(self, mask):
@@ -369,6 +388,12 @@ class OverworldScene:
         D.text(screen, f"{leader['name']}  (Leader)", 15, "ink", (54, 18), shadow=False)
         self.hp_bar.draw(screen, (54, 42, 150, 12))
         D.text(screen, f"{self.run.leader_hp}/{self.run.leader_max_hp}", 13, "ink", (210, 38), shadow=False)
+        if self.run.touched_corruption:
+            status = pygame.Rect(0, 0, 218, 26)
+            status.topleft = (42, 76)
+            D.panel(screen, status, radius=13, fill="cream", alpha=235, outline="plum")
+            D.text(screen, "TOUCHED CORRUPTION  ·  ATK -10%", 11, "plum",
+                   status.center, anchor="center", shadow=False)
 
         boss_txt = f"Bosses {len(self.run.bosses_defeated)}/{config.BOSSES_TO_WIN}"
         pill = pygame.Rect(0, 0, 130, 36)

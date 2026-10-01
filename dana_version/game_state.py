@@ -25,6 +25,7 @@ class RunState:
         self.chests_opened = set()
         self.buffs = []                      # buff dicts from data/buffs.py, kept all session
         self.battles_fought = 0
+        self.touched_corruption = False      # applies to the next battle only
 
     # ------------------------------------------------------------ party stats
     @property
@@ -41,11 +42,14 @@ class RunState:
 
     def party_specs(self):
         specs = []
+        atk_multiplier = 1 + self.atk_pct + self.buff_total("atk_pct")
+        if self.touched_corruption:
+            atk_multiplier -= config.CORRUPTION_TOUCH_ATK_PENALTY
         for i, key in enumerate(self.team):
             char = CHARACTERS[key]
             specs.append({
                 "char": char,
-                "atk": round(char["atk"] * (1 + self.atk_pct + self.buff_total("atk_pct"))),
+                "atk": round(char["atk"] * max(0.1, atk_multiplier)),
                 "spd": char["spd"] + self.spd_bonus,
                 "is_leader": i == self.leader_index,
             })
@@ -73,6 +77,7 @@ class RunState:
     def finish_battle(self, battle):
         self.leader_hp = battle.leader_hp
         self.battles_fought += 1
+        self.touched_corruption = False
 
     def record_defeat(self, entity_id, boss_id=None):
         self.defeated.add(entity_id)
@@ -130,6 +135,14 @@ class RunState:
 
     def heal(self, amount):
         self.leader_hp = min(self.leader_max_hp, self.leader_hp + amount)
+
+    def damage_leader(self, amount):
+        before = self.leader_hp
+        self.leader_hp = max(0, self.leader_hp - amount)
+        return before - self.leader_hp
+
+    def touch_corruption(self):
+        self.touched_corruption = True
 
     def full_heal(self):
         self.leader_hp = self.leader_max_hp
