@@ -4,7 +4,7 @@ with grass.
 Legend:
   .  grass (walk)      =  path (walk)       *  flowers (walk, decoration)
   ~  water (blocked)   T  tree (blocked)    o  bush (blocked)
-  P  player start      H  heal spring
+  P  player start      H  heal spring      N  Suspicious Mustache
   a-h  normal enemies (group below)         X Y Z  bosses (id below)
 Markers sit on grass."""
 
@@ -32,7 +32,7 @@ MAP_ROWS = [
     "TT.======================================================*TT",
     "TT.======================================================.TT",
     "TT*................**....*...==...........**.......==.*...TT",
-    "TT..*...*T....H.....T........==.P..............T...==....TTT",
+    "TT..*...*T....H.....T........==.P.N............T...==....TTT",
     "TT...........................==.....a..*........*T*==.....TT",
     "TT.....T....~~~~~.T...*......==........T....e......==*...TTT",
     "TTTT.....~~~~~~~~~~~.......T.==........T...........==.....TT",

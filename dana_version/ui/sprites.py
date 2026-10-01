@@ -137,3 +137,16 @@ def draw_chest(surface, x, y, opened, t):
         latch = pygame.Rect(0, 0, 8, 9)
         latch.center = (x, body.y + 6)
         draw_round_rect(surface, latch, mix(PALETTE["gold"], PALETTE["white"], glint * 0.6), 3)
+
+
+def draw_guide(surface, cx, feet_y, t, facing_x=0.0):
+    """Friendly slime with a mustache. Feet sit at (cx, feet_y)."""
+    bob = math.sin(t * 2.2) * 2
+    w, h = 44, 36
+    draw_body(surface, cx, feet_y - bob, w, h, "sage", facing_x=facing_x)
+    my = feet_y - bob - h * 0.40
+    col = PALETTE["ink"]
+    pygame.draw.ellipse(surface, col, (cx - 13, my, 11, 5))
+    pygame.draw.ellipse(surface, col, (cx + 2, my, 11, 5))
+    pygame.draw.circle(surface, col, (int(cx - 13), int(my + 4)), 2)
+    pygame.draw.circle(surface, col, (int(cx + 13), int(my + 4)), 2)

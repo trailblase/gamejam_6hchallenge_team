@@ -28,6 +28,7 @@ TOUCH_RADIUS = 24         # px between feet that starts a normal fight
 BOSS_TOUCH_RADIUS = 40    # px between feet that starts a boss fight
 FLEE_STUN_SECONDS = 3.0   # enemy can't move or fight for this long after you flee
 SPRING_USE_RADIUS = 1.4 * TILE
+GUIDE_TALK_RADIUS = 2.4 * TILE  # px; press E this close to Suspicious Mustache
 HINT_SECONDS = 10.0       # control hint duration on the first run
 TELEPORT_OFFSET = 2.5 * TILE  # F3 debug teleport lands this far from the boss
 
@@ -42,6 +43,7 @@ CORRUPT_MAX_FRACTION = 0.35      # spreading stops at this share of walkable til
 CORRUPT_SLOW = 0.5               # leader speed multiplier while standing on corruption
 CORRUPTION_TILE_DPS = 8.0        # leader HP lost per second while standing on corruption
 CORRUPTION_TOUCH_ATK_PENALTY = 0.10  # next battle's party ATK penalty after touching corruption
+CORRUPT_PAUSE_ON_WIN = 12.0      # spread waits this long after an enemy or boss is defeated
 CORRUPT_PULSE_SPEED = 1.6        # overlay alpha pulse (radians per second)
 CORRUPT_ALPHA = (120, 165)       # overlay alpha range (min, max) for the pulse
 CORRUPT_DUST_INTERVAL = 0.08     # seconds between dust puffs while slowed
@@ -58,6 +60,8 @@ CORRUPTION_RAIN_MAX_EXTRA_SPEED = 360
 # ------------------------------------------------------------- chests/buffs
 CHEST_OPEN_RADIUS = 1.4 * TILE   # px; press E within this range of a chest
 BUFF_POPUP_SECONDS = 2.4
+GUIDE_CHARS_PER_SEC = 34  # tutorial typewriter; the whole talk stays under ~20s
+GUIDE_LINE_HOLD = 0.7     # seconds a finished bubble stays before the next one
 
 # --------------------------------------------------------------- battle rules
 GAUGE_THRESHOLD = 100     # a unit acts when its gauge reaches this

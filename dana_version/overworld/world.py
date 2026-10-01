@@ -169,6 +169,15 @@ class Chest:
         self.opened = False
 
 
+class Guide:
+    """Friendly slime at the spawn. Talks; never fights or blocks."""
+
+    def __init__(self, tile):
+        self.tile = tile
+        self.x, self.y = tile_center_feet(*tile)
+        self.name = "Suspicious Mustache"
+
+
 def check_reachability(tilemap, start_tile, targets):
     """Flood-fill walkable tiles from the start; raise if any target tile
     (name -> (tx, ty)) can't be reached."""
@@ -222,7 +231,12 @@ class World:
             chest.opened = chest.id in chests_opened
             self.chests.append(chest)
 
+        spots = self.map.markers.get("N", [])
+        self.guide = Guide(spots[0]) if spots else None
+
         targets = {f"chest {c.id}": c.tile for c in self.chests}
+        if self.guide:
+            targets["guide"] = self.guide.tile
         for ch, tiles in self.map.markers.items():
             if ch in ENEMY_GROUPS or ch in BOSS_MARKERS or ch == "H":
                 for i, tile in enumerate(tiles):
@@ -233,12 +247,13 @@ class World:
         guarded = [c["tile"] for c in CHESTS if c["guarded"]]
         self.corruption = CorruptionGrid(self.map, rng, start, guarded, boss_tiles)
         self.spread_timer = 0.0
+        self.spread_pause = 0.0
 
         self.cam_x, self.cam_y = 0.0, 0.0
         self.snap_camera(config.WINDOW_W, config.WINDOW_H)
 
     # ------------------------------------------------------------- update
-    def update(self, dt, move_x, move_y, view_w, view_h):
+    def update(self, dt, move_x, move_y, view_w, view_h, freeze_enemies=False):
         """Advance one frame. Returns the Enemy touched this frame, or None."""
         p = self.player
         p.moving = bool(move_x or move_y)
@@ -253,16 +268,22 @@ class World:
                 p.x, p.y = nx, ny
                 self.trail.append((p.x, p.y))
 
-        for enemy in self.enemies:
-            enemy.update(dt, self.map, p)
+        if not freeze_enemies:
+            for enemy in self.enemies:
+                enemy.update(dt, self.map, p)
 
-        self.spread_timer += dt
-        while self.spread_timer >= config.CORRUPT_SPREAD_INTERVAL:
-            self.spread_timer -= config.CORRUPT_SPREAD_INTERVAL
-            self.corruption.spread_step()
+        if self.spread_pause > 0:
+            self.spread_pause = max(0.0, self.spread_pause - dt)
+        else:
+            self.spread_timer += dt
+            while self.spread_timer >= config.CORRUPT_SPREAD_INTERVAL:
+                self.spread_timer -= config.CORRUPT_SPREAD_INTERVAL
+                self.corruption.spread_step()
 
         self._update_camera(dt, view_w, view_h)
 
+        if freeze_enemies:
+            return None
         for enemy in self.enemies:
             if enemy.stun > 0:
                 continue
@@ -297,6 +318,16 @@ class World:
         return self.corruption.spread_step()
 
     # ------------------------------------------------------------ actions
+    def nearby_guide(self):
+        guide = self.guide
+        if guide and math.hypot(guide.x - self.player.x, guide.y - self.player.y) < config.GUIDE_TALK_RADIUS:
+            return guide
+        return None
+
+    def pause_spread(self, seconds):
+        """Hold corruption spread after a victory. A new win refreshes the wait."""
+        self.spread_pause = max(self.spread_pause, seconds)
+
     def nearby_chest(self):
         p = self.player
         for c in self.chests:

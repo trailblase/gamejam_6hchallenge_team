@@ -19,6 +19,54 @@ FOLLOWER_W, FOLLOWER_H = 21, 25
 OVERWORLD_ENEMY_SCALE = 0.55
 OVERWORLD_BOSS_SCALE = 0.62
 TOAST_SECONDS = 2.2
+MINIMAP_SCALE = 3          # pixels per tile on the corner map
+MINIMAP_PAD = 8
+MINIMAP_MARGIN = 14
+
+# Short enough that letting every bubble play out stays under about 20 seconds.
+# Space finishes the current bubble, then advances.
+GUIDE_SCRIPT = [
+    ["I'm Suspicious Mustache.",
+     "This was a peaceful world of slimes."],
+    ["The corruption must be cleansed.",
+     "Defeat the three bosses on the map."],
+    ["The purple meter is how much has spread.",
+     "More tiles rot as time goes on."],
+    ["Purple ground slows you down",
+     "and drains your HP, slowly."],
+    ["Step into their area and small enemies",
+     "pull you into a fight."],
+    ["Attack, Skill, Block, or Flee.",
+     "The leader's HP is the whole team's."],
+    ["A win pauses the rot. Here's a buff.",
+     "Chests give more. Springs restore HP."],
+]
+
+
+class _Talk:
+    def __init__(self):
+        self.index = 0
+        self.shown = 0.0
+        self.hold = 0.0
+
+    def lines(self):
+        return GUIDE_SCRIPT[self.index]
+
+    def length(self):
+        return sum(len(line) for line in self.lines())
+
+    def complete(self):
+        return self.shown >= self.length()
+
+    def visible(self):
+        left = int(self.shown)
+        out = []
+        for line in self.lines():
+            if left <= 0:
+                break
+            out.append(line[:left])
+            left -= len(line)
+        return out
 
 
 class OverworldScene:
@@ -29,6 +77,7 @@ class OverworldScene:
         print(f"[overworld] map check ok: {self.world.reachable_tiles} reachable tiles; "
               f"corruption seeds {self.world.corruption.count}, cap {self.world.corruption.cap}")
         self.ground = self._render_ground()
+        self.minimap = self._render_minimap()
         self.props = self._collect_props()
         self.t = 0.0
         self.hint_timer = config.HINT_SECONDS if app.first_run else 0.0
@@ -45,6 +94,8 @@ class OverworldScene:
         self.overlay_cache = {}
         self.corruption_damage_fraction = 0.0
         self._was_on_corruption = False
+        self.talk = None
+        self.guide_gifted = False
 
     # ------------------------------------------------------------ prerender
     def _render_ground(self):
@@ -74,6 +125,31 @@ class OverworldScene:
                         pygame.draw.circle(surf, D.PALETTE["gold"], (fx, fy), 1)
         return surf
 
+    def _render_minimap(self):
+        tm = self.world.map
+        scale = MINIMAP_SCALE
+        colors = {
+            "grass": D.PALETTE["grass"],
+            "flowers": D.PALETTE["sage_light"],
+            "path": D.PALETTE["path"],
+            "water": D.PALETTE["blue"],
+            "tree": D.PALETTE["sage_dark"],
+            "bush": D.PALETTE["sage"],
+        }
+        surf = pygame.Surface((tm.w * scale, tm.h * scale))
+        for ty in range(tm.h):
+            for tx in range(tm.w):
+                surf.fill(colors.get(tm.kind(tx, ty), D.PALETTE["grass"]),
+                          (tx * scale, ty * scale, scale, scale))
+        return surf
+
+    def _minimap_panel(self, vw, vh):
+        tm = self.world.map
+        rect = pygame.Rect(0, 0, tm.w * MINIMAP_SCALE + MINIMAP_PAD * 2,
+                           tm.h * MINIMAP_SCALE + MINIMAP_PAD * 2 + 14)
+        rect.bottomright = (vw - MINIMAP_MARGIN, vh - MINIMAP_MARGIN)
+        return rect
+
     @staticmethod
     def _rounded_tile(surf, tm, tx, ty, kind, col):
         same = lambda dx, dy: tm.kind(tx + dx, ty + dy) == kind  # noqa: E731
@@ -100,7 +176,25 @@ class OverworldScene:
     def handle_event(self, event):
         if event.type != pygame.KEYDOWN:
             return
-        if event.key == pygame.K_e:
+        if event.key == pygame.K_SPACE and self.talk:
+            self._skip_talk()
+            return
+        if event.key == pygame.K_F2:
+            self._debug_win_nearest()
+        elif event.key == pygame.K_F4:
+            n = self.world.force_spread()
+            c = self.world.corruption
+            print(f"[debug] F4 spread step: +{n} tiles ({c.count}/{c.cap})")
+        elif event.key == pygame.K_F3:
+            boss = self.world.teleport_near_next_boss(config.WINDOW_W, config.WINDOW_H)
+            print(f"[debug] teleported near {boss.key if boss else 'nothing (no bosses left)'}")
+        elif self.talk:
+            return
+        elif event.key == pygame.K_e:
+            if self.world.nearby_guide():
+                self.talk = _Talk()
+                print("[overworld] Suspicious Mustache starts talking")
+                return
             chest = self.world.open_chest()
             if chest:
                 self._open_chest(chest)
@@ -111,15 +205,34 @@ class OverworldScene:
                 self.run.full_heal()
                 self._toast("The spring restores the leader to full HP!")
                 print(f"[overworld] used {spring.id}: leader HP {self.run.leader_hp}/{self.run.leader_max_hp}")
-        elif event.key == pygame.K_F2:
-            self._debug_win_nearest()
-        elif event.key == pygame.K_F4:
-            n = self.world.force_spread()
-            c = self.world.corruption
-            print(f"[debug] F4 spread step: +{n} tiles ({c.count}/{c.cap})")
-        elif event.key == pygame.K_F3:
-            boss = self.world.teleport_near_next_boss(config.WINDOW_W, config.WINDOW_H)
-            print(f"[debug] teleported near {boss.key if boss else 'nothing (no bosses left)'}")
+
+    def _skip_talk(self):
+        """Space finishes the current bubble, then moves to the next."""
+        talk = self.talk
+        if not talk.complete():
+            talk.shown = talk.length()
+            if talk.index == len(GUIDE_SCRIPT) - 1:
+                self._gift_buff()
+            return
+        self._advance_talk()
+
+    def _advance_talk(self):
+        self.talk.index += 1
+        if self.talk.index >= len(GUIDE_SCRIPT):
+            self.talk = None
+            return
+        self.talk.shown = 0.0
+        self.talk.hold = 0.0
+
+    def _gift_buff(self):
+        if self.guide_gifted:
+            return
+        self.guide_gifted = True
+        buff = self.run.roll_buff()
+        self.run.apply_buff(buff)
+        self.buff_popup = buff
+        self.buff_timer = config.BUFF_POPUP_SECONDS
+        print(f"[overworld] Suspicious Mustache gave buff {buff['name']} ({buff['desc']})")
 
     def _open_chest(self, chest):
         buff = self.run.roll_buff()
@@ -139,9 +252,13 @@ class OverworldScene:
     def update(self, dt):
         self.t += dt
         keys = pygame.key.get_pressed()
-        mx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
-        my = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
-        touched = self.world.update(dt, mx, my, config.WINDOW_W, config.WINDOW_H)
+        if self.talk:
+            mx = my = 0
+        else:
+            mx = (keys[pygame.K_d] or keys[pygame.K_RIGHT]) - (keys[pygame.K_a] or keys[pygame.K_LEFT])
+            my = (keys[pygame.K_s] or keys[pygame.K_DOWN]) - (keys[pygame.K_w] or keys[pygame.K_UP])
+        touched = self.world.update(dt, mx, my, config.WINDOW_W, config.WINDOW_H,
+                                     freeze_enemies=self.talk is not None)
         on_corruption = self.world.leader_slowed
         if on_corruption:
             if not self._was_on_corruption:
@@ -157,6 +274,7 @@ class OverworldScene:
             self.hint_timer -= dt
         if self.toast_timer > 0:
             self.toast_timer -= dt
+        self._update_talk(dt)
         self.hp_bar.set(self.run.leader_hp, self.run.leader_max_hp)
         self.hp_bar.update(dt)
         self._update_corruption_fx(dt)
@@ -164,8 +282,21 @@ class OverworldScene:
             from scenes.end_screens import GameOverScene
             self.app.transition_to(GameOverScene(self.app, self))
             return
-        if touched:
+        if touched and not self.talk:
             self._start_battle(touched)
+
+    def _update_talk(self, dt):
+        talk = self.talk
+        if not talk:
+            return
+        if not talk.complete():
+            talk.shown = min(talk.length(), talk.shown + config.GUIDE_CHARS_PER_SEC * dt)
+            if talk.complete() and talk.index == len(GUIDE_SCRIPT) - 1:
+                self._gift_buff()
+            return
+        talk.hold += dt
+        if talk.hold >= config.GUIDE_LINE_HOLD:
+            self._advance_talk()
 
     def _update_corruption_fx(self, dt):
         target = self.world.corruption.fraction_of_cap
@@ -196,6 +327,7 @@ class OverworldScene:
         """Called by the battle scene once its result (and reward) is done."""
         if outcome == "victory":
             self.world.remove_enemy(enemy.id)
+            self.world.pause_spread(config.CORRUPT_PAUSE_ON_WIN)
             self.run.record_defeat(enemy.id, enemy.key if enemy.is_boss else None)
             if enemy.is_boss:
                 self._toast(f"Boss defeated!  {len(self.run.bosses_defeated)}/{config.BOSSES_TO_WIN}")
@@ -213,6 +345,7 @@ class OverworldScene:
             self.app.transition_to(GameOverScene(self.app, self))
 
     def retry(self):
+        self.talk = None
         self.run.retry()
         self.world.respawn_player(config.WINDOW_W, config.WINDOW_H)
         self.hp_bar = D.AnimatedBar(self.run.leader_hp, self.run.leader_max_hp)
@@ -246,6 +379,9 @@ class OverworldScene:
             drawables.append((chest.y, "chest", chest.x - cam_x, chest.y - cam_y, chest))
         for enemy in self.world.enemies:
             drawables.append((enemy.y, "enemy", enemy.x - cam_x, enemy.y - cam_y, enemy))
+        if self.world.guide:
+            guide = self.world.guide
+            drawables.append((guide.y, "guide", guide.x - cam_x, guide.y - cam_y, guide))
         followers = self.world.follower_positions()
         team = self.run.team
         others = [k for i, k in enumerate(team) if i != self.run.leader_index]
@@ -266,6 +402,11 @@ class OverworldScene:
                 S.draw_chest(screen, sx, sy, obj.opened, self.t)
             elif kind == "enemy":
                 self._draw_enemy(screen, obj, sx, sy)
+            elif kind == "guide":
+                facing = -0.6 if p.x < obj.x else 0.6
+                S.draw_guide(screen, sx, sy, self.t, facing)
+                if not self.talk:
+                    D.text(screen, obj.name, 13, "ink", (sx, sy - 56), anchor="center")
             elif kind == "follower":
                 bob = math.sin(self.t * 9 + sx * 0.1) * 2 if p.moving else math.sin(self.t * config.BOB_SPEED) * 1.5
                 S.draw_body(screen, sx, sy - abs(bob), FOLLOWER_W, FOLLOWER_H, CHARACTERS[obj]["color"],
@@ -279,6 +420,8 @@ class OverworldScene:
 
         draw_corruption_weather(screen, self.meter, self.t)
         self._draw_hud(screen)
+        self._draw_minimap(screen)
+        self._draw_talk(screen)
 
     def _overlay_tile(self, mask):
         """Purple tile, corners rounded only where no corrupted neighbor
@@ -402,7 +545,13 @@ class OverworldScene:
         D.text(screen, boss_txt, 16, "ink", pill.center, anchor="center", shadow=False)
 
         self._draw_corruption_meter(screen)
-        chest = self.world.nearby_chest()
+        guide = None if self.talk else self.world.nearby_guide()
+        if guide:
+            tip = pygame.Rect(0, 0, 110, 28)
+            tip.midbottom = (guide.x - self.world.cam_x, guide.y - self.world.cam_y - 78)
+            D.panel(screen, tip, radius=14)
+            D.text(screen, "E  Talk", 14, "ink", tip.center, anchor="center", shadow=False)
+        chest = None if guide else self.world.nearby_chest()
         if chest:
             tip = pygame.Rect(0, 0, 120, 28)
             tip.midbottom = (chest.x - self.world.cam_x, chest.y - self.world.cam_y - 34)
@@ -417,12 +566,13 @@ class OverworldScene:
             D.panel(screen, tip, radius=14)
             D.text(screen, "E  Drink", 14, "ink", tip.center, anchor="center", shadow=False)
 
-        if self.hint_timer > 0:
+        if self.hint_timer > 0 and not self.talk:
             a = int(255 * min(1.0, self.hint_timer))
-            box = pygame.Rect(0, 0, 640, 36)
-            box.midbottom = (vw / 2, vh - 16)
+            panel = self._minimap_panel(vw, vh)
+            box = pygame.Rect(0, 0, 520, 36)
+            box.midbottom = ((16 + panel.left - 12) / 2, vh - 16)
             D.draw_round_rect(screen, box, D.with_alpha(D.PALETTE["cream"], int(a * 0.85)), 18)
-            D.text(screen, "WASD / Arrows: move     E: open chest / drink     F1: debug", 15, "ink",
+            D.text(screen, "WASD / Arrows: move     E: talk / chest / spring     F1: debug", 15, "ink",
                    box.center, anchor="center", shadow=False, alpha=a)
 
         if self.buff_popup and self.buff_timer > 0:
@@ -446,6 +596,97 @@ class OverworldScene:
             D.draw_round_rect(screen, box, D.with_alpha(D.PALETTE["cream"], int(a * 0.9)), 18)
             D.text(screen, self.toast, 15, "ink", box.center, anchor="center", shadow=False, alpha=a)
 
+    def _draw_talk(self, screen):
+        talk = self.talk
+        guide = self.world.guide
+        if not talk or not guide:
+            return
+        lines = talk.lines()
+        shown = talk.visible()
+        size, name_size, line_h, pad = 16, 14, 22, 16
+        text_w = max(D.font(size).size(line)[0] for line in lines)
+        text_w = max(text_w, D.font(name_size).size(guide.name)[0])
+        box = pygame.Rect(0, 0, text_w + pad * 2, pad + 22 + line_h * len(lines) + 16)
+        sx = guide.x - self.world.cam_x
+        sy = guide.y - self.world.cam_y - 64
+        box.midbottom = (sx, sy)
+        vw, vh = screen.get_size()
+        box.clamp_ip(pygame.Rect(12, 12, vw - 24, vh - 24))
+        mini = self._minimap_panel(vw, vh)
+        if box.colliderect(mini):
+            box.right = mini.left - 8
+        D.panel(screen, box, radius=18)
+        D.text(screen, guide.name, name_size, "sage_dark", (box.x + pad, box.y + 10), shadow=False)
+        for i, _line in enumerate(lines):
+            text = shown[i] if i < len(shown) else ""
+            if text:
+                D.text(screen, text, size, "ink", (box.x + pad, box.y + 32 + i * line_h), shadow=False)
+        prompt = "Space"
+        alpha = 255 if talk.complete() else 120
+        if talk.complete():
+            alpha = int(150 + 105 * (0.5 + 0.5 * math.sin(self.t * 6)))
+        D.text(screen, prompt, 12, "ink_soft", (box.right - pad, box.bottom - 8),
+               anchor="bottomright", shadow=False, alpha=alpha)
+
+    def _draw_minimap(self, screen):
+        """Corner map: terrain, you, and the places worth walking to."""
+        vw, vh = screen.get_size()
+        panel = self._minimap_panel(vw, vh)
+        D.panel(screen, panel, radius=16)
+        D.text(screen, "Map", 12, "ink_soft", (panel.x + 12, panel.y + 5), shadow=False)
+
+        scale = MINIMAP_SCALE
+        origin = (panel.x + MINIMAP_PAD, panel.y + MINIMAP_PAD + 14)
+        tm = self.world.map
+        map_rect = pygame.Rect(origin, (tm.w * scale, tm.h * scale))
+        screen.blit(self.minimap, origin)
+
+        clip = screen.get_clip()
+        screen.set_clip(map_rect)
+        corruption = self.world.corruption
+        for ty, row in enumerate(corruption.grid):
+            for tx, corrupt in enumerate(row):
+                if corrupt:
+                    screen.fill(D.PALETTE["plum"], (origin[0] + tx * scale, origin[1] + ty * scale, scale, scale))
+
+        view = pygame.Rect(origin[0] + self.world.cam_x / T * scale,
+                           origin[1] + self.world.cam_y / T * scale,
+                           vw / T * scale, vh / T * scale)
+        pygame.draw.rect(screen, D.PALETTE["cream"], view, 1)
+
+        def pin(world_x, world_y):
+            return origin[0] + world_x / T * scale, origin[1] + world_y / T * scale
+
+        for chest in self.world.chests:
+            if not chest.opened:
+                cx, cy = pin(chest.x, chest.y)
+                pygame.draw.rect(screen, D.PALETTE["gold"], (cx - 2, cy - 2, 4, 4))
+                pygame.draw.rect(screen, D.PALETTE["ink"], (cx - 2, cy - 2, 4, 4), 1)
+        for spring in self.world.springs:
+            if not spring.used:
+                pygame.draw.circle(screen, D.PALETTE["blue_dark"], pin(spring.x, spring.y), 2)
+
+        for enemy in self.world.enemies:
+            if not enemy.is_boss:
+                continue
+            bx, by = pin(enemy.x, enemy.y)
+            color = D.PALETTE[BOSSES[enemy.key]["color"]]
+            diamond = [(bx, by - 5), (bx + 5, by), (bx, by + 5), (bx - 5, by)]
+            pygame.draw.polygon(screen, D.PALETTE["cream"], diamond)
+            inner = [(bx, by - 3), (bx + 3, by), (bx, by + 3), (bx - 3, by)]
+            pygame.draw.polygon(screen, color, inner)
+            pygame.draw.polygon(screen, D.PALETTE["ink"], diamond, 1)
+
+        p = self.world.player
+        px, py = pin(p.x, p.y)
+        fx, fy = p.facing
+        pygame.draw.line(screen, D.PALETTE["ink"], (px, py), (px + fx * 8, py + fy * 8), 2)
+        pulse = 3 if int(self.t * 2) % 2 else 4
+        pygame.draw.circle(screen, D.PALETTE["white"], (px, py), pulse + 1)
+        pygame.draw.circle(screen, D.PALETTE["gold"], (px, py), pulse)
+        pygame.draw.circle(screen, D.PALETTE["ink"], (px, py), pulse, 1)
+        screen.set_clip(clip)
+
     def debug_lines(self):
         p = self.world.player
         near = self.world.nearest_enemy()
@@ -454,9 +695,12 @@ class OverworldScene:
                  f"leader HP {self.run.leader_hp}/{self.run.leader_max_hp}  "
                  f"atk+{self.run.atk_pct:.0%} spd+{self.run.spd_bonus} maxSP {self.run.max_sp}"]
         c = self.world.corruption
+        if self.world.spread_pause > 0:
+            spread = f"spread paused {self.world.spread_pause:.1f}s"
+        else:
+            spread = f"next spread {config.CORRUPT_SPREAD_INTERVAL - self.world.spread_timer:.1f}s"
         lines.append(f"corrupted tiles {c.count}/{c.cap} (cap {config.CORRUPT_MAX_FRACTION:.0%} of {c.walkable} "
-                     f"walkable)  next spread {config.CORRUPT_SPREAD_INTERVAL - self.world.spread_timer:.1f}s  "
-                     f"slowed {self.world.leader_slowed}")
+                     f"walkable)  {spread}  slowed {self.world.leader_slowed}")
         buffs = ", ".join(b["name"] for b in self.run.buffs) or "none"
         lines.append(f"buffs: {buffs}   battle modifiers {self.run.battle_modifiers()}")
         if near:
